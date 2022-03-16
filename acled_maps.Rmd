@@ -1,0 +1,258 @@
+---
+title: "Exploratory data analysis of conflict data and food security cluster presence"
+author: "Myanmar Food Security Cluster"
+date: "11/02/2022"
+output: 
+  html_document:
+    code_download: true
+    theme: readable
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: false
+    collapsed: false
+always_allow_html: true   
+---
+
+```{css, echo=FALSE}
+
+#TOC::before {
+  content: "";
+  display: block;
+  height: 70px;
+  margin: 2em 20px 40px 20px;
+  background-image: url("Myanmar_cluster_blue.png");
+  background-size: contain;
+  background-position: center center;
+  background-repeat: no-repeat;
+}
+```
+
+```{=html}
+<style>
+    body .main-container {
+        max-width: 1280px;
+    }
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width=9, message = FALSE, warning=FALSE)
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(janitor)
+library(scales)
+library(magrittr)
+library(sf)
+library(s2)
+library(plotly)
+library(viridis)
+library(ggsflabel)
+
+theme_set(theme_light())
+
+# reading in townships from geoadmins 
+townships <- read_excel("C:/Users/seany/Documents/R/acled/FSC 5W 2021 - GEOADMINS_final 19.xlsx",
+           sheet = "GEOADMINS") %>% 
+  clean_names() %>% 
+  select(admin1pcode_4:admin3pcode) %>% 
+  rename(admin1_pcode = admin1pcode_4,
+         admin3_pcode = admin3pcode,
+         state_name   = state_5,
+         township_name  = county) %>% 
+  remove_empty() %>% 
+  mutate(admin3_pcode = ifelse(state_name == "Magway" & township_name == "Minhla", "MMR009013", admin3_pcode),
+         admin3_pcode = ifelse(state_name == "Yangon" & township_name == "Htantabin", "MMR013006", admin3_pcode))
+
+# reading in acled
+acled <- read_excel("C:/Users/seany/Documents/R/acled/2010-01-01-2022-01-25-Myanmar.xlsx", 
+         sheet = "2010-2021-Cleaned") %>% 
+  mutate(admin3 = recode(admin3,
+                        "Dagon Myothit-South" = "Dagon Myothit (South)",
+                        "Dagon Myothit-North" = "Dagon Myothit (North)",
+                        "Dagon Myothit-Seikkan" = "Dagon Myothit (Seikkan)",
+                        "Dagon Myothit-East" = "Dagon Myothit (East)",
+                        "Hlaingtharya-East" = "Hlaingtharya",
+                        "Hlaingtharya-West" = "Hlaingtharya",
+                        "Pangsang" = "Pangsang (Panghkam)")) %>% 
+  # locations in yangon with longlat, but no admin3 have been coded as Kyauktada, where city hall is;
+  # similarly, in mandalay, they have been placed in Chanayethazan and Zay yar thi ri in NPT
+  mutate(admin3 = case_when(is.na(admin3) & latitude == 16.8052 ~ "Kyauktada",
+                           is.na(admin3) & latitude == 19.7450 ~ "Zay Yar Thi Ri",
+                           is.na(admin3) & latitude == 21.9747 ~ "Chanayethazan",
+                           TRUE ~ admin3)) %>% 
+  left_join(townships %>%  
+              select(township_name, admin3_pcode), by = c("admin3" = "township_name")) %>% 
+  group_by(data_id) %>% 
+  slice(which.min(event_id_no_cnty)) %>%
+  ungroup() %>% 
+  mutate(inter_type = interaction,
+         inter_type = recode_factor(inter_type,
+                             `10` = "SOLE	MILITARY ACTION",
+                             `11` = "MILITARY VERSUS MILITARY",
+                             `12` = "MILITARY VERSUS REBELS",
+                             `13` = "MILITARY VERSUS POLITICAL MILITIA",
+                             `14` = "MILITARY VERSUS COMMUNAL MILITIA",
+                             `15` = "MILITARY VERSUS RIOTERS",
+                             `16` = "MILITARY VERSUS PROTESTERS",
+                             `17` = "MILITARY VERSUS CIVILIANS",
+                             `18` = "MILITARY VERSUS OTHER",
+                             `20` = "SOLE REBEL ACTION",
+                             `22` = "REBELS VERSUS REBELS",
+                             `23` = "REBELS	VERSUS POLITICAL MILIITA ",
+                             `24` = "REBELS VERSUS COMMUNAL MILITIA",
+                             `25` = "REBELS VERSUS RIOTERS",
+                             `26` = "REBELS VERSUS PROTESTERS ",
+                             `27` = "REBELS VERSUS CIVILIANS",
+                             `28` = "REBELS VERSUS OTHERS",
+                             `30` = "SOLE POLITICAL MILITIA ACTION",
+                             `33` = "POLITICAL MILITIA VERSUS POLITICAL	MILITIA",
+                             `34` = "POLITICAL MILITIA VERSUS COMMUNAL	MILITIA",
+                             `35` = "POLITICAL MILITIA VERSUS RIOTERS",
+                             `36` = "POLITICAL MILITIA VERSUS PROTESTERS",
+                             `37` = "POLITICAL MILITIA VERSUS CIVILIANS",
+                             `38` = "POLITICAL MILITIA VERSUS OTHERS",
+                             `40` = "SOLE COMMUNAL MILITIA ACTION",
+                             `44` = "COMMUNAL MILITIA VERSUS COMMUNAL MILITIA",
+                             `45` = "COMMUNAL MILITIA VERSUS RIOTERS",
+                             `46` = "COMMUNAL	MILITIA	VERSUS PROTESTERS ",
+                             `47` = "COMMUNAL MILITIA VERSUS CIVILIANS",
+                             `48` = "COMMUNAL MILITIA VERSUS OTHER",
+                             `50` = "SOLE RIOTER ACTION",
+                             `55` = "RIOTERS VERSUS RIOTERS",
+                             `56` = "RIOTERS VERSUS PROTESTERS",
+                             `57` = "RIOTERS VERSUS CIVILIANS",
+                             `58` = "RIOTERS VERSUS OTHERS",
+                             `60` = "SOLE PROTESTER ACTION",
+                             `66` = "PROTESTERS VERSUS PROTESTERS",
+                             `67` = "PROTESTERS VERSUS CIVILIANS",
+                             `68` = "PROTESTERS VERSUS OTHER",
+                             `78` = "OTHER ACTOR VERSUS CIVILIANS",
+                             `80` = "SOLE OTHER ACTION"), 
+         inter_type = tolower(str_trim(str_replace_all(inter_type, "[\\r\\n\\t]+", " ")))) %>% 
+  mutate(admin3_pcode = ifelse(admin3_pcode == "MMR007014" & admin1 == "Yangon", "MMR013006", admin3_pcode),
+         admin3_pcode = ifelse(admin1 == "Magway" & admin3 == "Minhla", "MMR009013", admin3_pcode)) %>% 
+  mutate(has_fatalities = ifelse(fatalities > 0, TRUE, FALSE)) %>%
+  mutate(month = lubridate::month(event_date, label = TRUE)) %>%
+  mutate(non_combatant = case_when(event_type == "Violence against civilians" ~ TRUE, 
+                                   str_detect(inter_type, "civilian|protester") ~ TRUE, 
+                                   str_detect(notes, "civilian|protester") ~ TRUE, 
+                                   TRUE ~ FALSE))
+
+# shapefiles
+pcode3_shape <- st_read("C:/Users/seany/Documents/R/acled/mmr_polbnda_adm3_mimu_250k/mmr_polbnda_adm3_mimu_250k.shp", quiet = TRUE) %>% 
+ rename(state = ST, 
+        admin1_pcode = ST_PCODE,
+        township = TS,
+        admin3_pcode = TS_PCODE) %>% 
+ mutate(admin3_pcode = ifelse(str_detect(township, "Hlaingtharya"), "MMR013008", admin3_pcode))
+
+pcode1_shape <- st_read("C:/Users/seany/Documents/R/acled/mmr_polbnda2_adm1_mimu_250k/mmr_polbnda2_adm1_mimu_250k.shp", quiet = TRUE) %>% 
+ rename(state = ST, 
+        admin1_pcode = ST_PCODE) %>% st_as_sf()
+
+# reading in vulnerability dataset
+vulmmr <- read_excel("C:/Users/seany/Documents/R/mmr_5w_initial_observations/Datasets_Vulnerability_Analysis_in_Myanmar_09Jul2018 (1).xlsx",
+           skip = 1) %>% 
+  slice(-c(1:3)) %>% 
+  clean_names() %>% 
+  select(-label) %>% 
+  mutate_at(vars(number_of_village_tracts:wb_wealth_rank), as.numeric) %>% 
+  mutate_at(vars(disasters_impacted_by_nargis_2008:acled_2015_2016_data_exists), as.logical) %>% 
+  mutate_at(vars(conflict_2015_2016_number_of_battles:corrected_conflict_index_garry), as.numeric) %>% 
+  select(-starts_with("x")) %>% 
+  select(-c(private_sector_development_2014_2015, protection_2010_2015, shelter_2010_2015, wash_2010_2015))
+
+
+# conflict scores df
+conflict_score <- read_csv("conflict_score.csv")
+```
+
+
+
+### 7.3 Interactive reference maps -- agricultural and conflict
+
+<br><br>
+
+**[Back](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/)** to main report.  
+
+#### 7.3.1 Agricultural area sown
+
+
+```{r ggplotly-area-sown, fig.height = 10}
+
+ag_map <- vulmmr %>%
+  select(area_sown = all_area_sowed_mali, admin3_pcode = township_pcode, 
+         township_name, state_name = state_region_name) %>%
+  right_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>%
+  ggplot() +
+  geom_sf(aes(fill = area_sown, 
+         text = paste0(township_name, ",", "\n", 
+                       state_name, "\n", 
+                       "area_sown: ", area_sown, "\n")), size = 0.1) +
+  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
+  scale_fill_viridis_c(direction = -1, label = scales::comma, breaks = c(0, 50000, 200000, 400000, 600000, 750000)) +
+  theme_void() + 
+  labs(fill = "sown area (acres)", 
+       title = "Agricultural area sown (2015)",
+       caption = "Data source: ACLED; acleddata.com and Ministry of Agriculture and Irrigation") +
+  theme(plot.caption=element_text(hjust = 0.2),
+        plot.background = element_rect(fill = "white", colour = NA),
+        plot.title = element_text(size = 12)) 
+
+
+ggplotly(ag_map, tooltip = c("text")) %>% 
+  layout(showlegend = TRUE, legend = list(font = list(size = 6))) %>% 
+  layout(title = list(text = paste0("Conflict events (2021) and agricultural area sown (2015)",
+                                    "<br>",
+                                    "<sup>",
+                                    "Data source: Ministry of Agriculture and Irrigation; click and drag to zoom in ","</sup>")))
+
+
+```
+
+<br><br><br>
+
+#### 7.3.2 Township-level conflict map 
+
+
+```{r ggplotly-conflict-map, fig.height = 10}
+
+conflict_map <- conflict_score %>% 
+  left_join(townships %>% select(state_name, township_name, admin3_pcode), by = "admin3_pcode") %>% 
+  mutate(score_i = round(score_i, digits = 2)) %>% 
+  right_join(pcode3_shape, by = "admin3_pcode") %>%
+  st_as_sf() %>%
+  ggplot() +
+  geom_sf(aes(fill = score_i,
+             text = paste0(township, ",","\n", 
+                       state, "\n",
+                       "fatalities: ", fatalities, "\n", 
+                       "battles: ", battles, "\n",
+                       "explosions/remote violence: ", explosions_remote_violence, "\n", 
+                       "violence against civilians: ", violence_against_civilians, "\n",
+                       "conflict score: ", score_i)), size = 0.1) + 
+  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
+  scale_fill_viridis_c(direction = -1, option = "magma") + 
+  theme_void() + 
+  labs(fill = "Conflict score", 
+       title = "Conflict score by township",
+       caption = "Data source: ACLED; acleddata.com") +
+  theme(plot.caption=element_text(hjust = 0.2),
+        plot.background = element_rect(fill = "white", colour = NA),
+        plot.title = element_text(size = 12)) 
+
+ggplotly(conflict_map, tooltip = c("text")) %>% 
+  layout(showlegend = TRUE, legend = list(font = list(size = 6))) %>% 
+  layout(title = list(text = paste0("Conflict events (2021) by township",
+                                    "<br>",
+                                    "<sup>",
+                                    "Data source: ACLED, acleddata.com; click and drag to zoom in","</sup>")))
+
+```
+
+<br>
+
+**[Back](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/)** to main report.  
