@@ -173,49 +173,9 @@ conflict_score <- read_csv("conflict_score.csv")
 
 ### 7.3 Interactive reference maps -- agricultural and conflict
 
-<br><br>
-
 **[Back](https://food-security-cluster-myanmar.github.io/exploratory-data-analysis-acled-fsc/)** to main report.  
 
-#### 7.3.1 Agricultural area sown
-
-
-```{r ggplotly-area-sown, fig.height = 10}
-
-ag_map <- vulmmr %>%
-  select(area_sown = all_area_sowed_mali, admin3_pcode = township_pcode, 
-         township_name, state_name = state_region_name) %>%
-  right_join(pcode3_shape, by = "admin3_pcode") %>% 
-  st_as_sf() %>%
-  ggplot() +
-  geom_sf(aes(fill = area_sown, 
-         text = paste0(township_name, ",", "\n", 
-                       state_name, "\n", 
-                       "area_sown: ", area_sown, "\n")), size = 0.1) +
-  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
-  scale_fill_viridis_c(direction = -1, label = scales::comma, breaks = c(0, 50000, 200000, 400000, 600000, 750000)) +
-  theme_void() + 
-  labs(fill = "sown area (acres)", 
-       title = "Agricultural area sown (2015)",
-       caption = "Data source: ACLED; acleddata.com and Ministry of Agriculture and Irrigation") +
-  theme(plot.caption=element_text(hjust = 0.2),
-        plot.background = element_rect(fill = "white", colour = NA),
-        plot.title = element_text(size = 12)) 
-
-
-ggplotly(ag_map, tooltip = c("text")) %>% 
-  layout(showlegend = TRUE, legend = list(font = list(size = 6))) %>% 
-  layout(title = list(text = paste0("Conflict events (2021) and agricultural area sown (2015)",
-                                    "<br>",
-                                    "<sup>",
-                                    "Data source: Ministry of Agriculture and Irrigation; click and drag to zoom in ","</sup>")))
-
-
-```
-
-<br><br><br>
-
-#### 7.3.2 Township-level conflict map 
+#### 7.3.1 Township-level conflict map 
 
 
 ```{r ggplotly-conflict-map, fig.height = 10}
@@ -252,6 +212,47 @@ ggplotly(conflict_map, tooltip = c("text")) %>%
                                     "Data source: ACLED, acleddata.com; click and drag to zoom in","</sup>")))
 
 ```
+
+<br><br><br>
+
+#### 7.3.2 Agricultural area sown
+
+
+```{r ggplotly-area-sown, fig.height = 10}
+
+ag_map <- vulmmr %>%
+  select(area_sown = all_area_sowed_mali, percent_paddy = paddy_as_percentage_of_all_harvested, 
+         admin3_pcode = township_pcode, township_name, state_name = state_region_name) %>%
+  mutate(percent_paddy = round(percent_paddy * 100, digits = 2)) %>% 
+  right_join(pcode3_shape, by = "admin3_pcode") %>% 
+  st_as_sf() %>%
+  ggplot() +
+  geom_sf(aes(fill = area_sown, 
+         text = paste0(township_name, ",", "\n", 
+                       state_name, "\n", 
+                       "acres sown: ", area_sown, "\n", 
+                       "paddy % of total: ", percent_paddy)), size = 0.1) +
+  geom_sf(data = pcode1_shape, alpha = 0, colour = "black", size = 0.5) +
+  scale_fill_viridis_c(direction = -1, label = scales::comma, breaks = c(0, 50000, 200000, 400000, 600000, 750000)) +
+  theme_void() + 
+  labs(fill = "sown area (acres)", 
+       title = "Agricultural area sown (2015)",
+       caption = "Data source: ACLED; acleddata.com and Ministry of Agriculture and Irrigation") +
+  theme(plot.caption=element_text(hjust = 0.2),
+        plot.background = element_rect(fill = "white", colour = NA),
+        plot.title = element_text(size = 12)) 
+
+
+ggplotly(ag_map, tooltip = c("text")) %>% 
+  layout(showlegend = TRUE, legend = list(font = list(size = 6))) %>% 
+  layout(title = list(text = paste0("Conflict events (2021) and agricultural area sown (2015)",
+                                    "<br>",
+                                    "<sup>",
+                                    "Data source: Ministry of Agriculture and Irrigation; click and drag to zoom in ","</sup>")))
+
+
+```
+
 
 <br>
 
